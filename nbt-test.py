@@ -59,8 +59,11 @@ def nbt_read(fh):
     elif tag_type == 7:
         tag = 'Byte_Array?'
         length = int.from_bytes(fh.read(4), byteorder='little') 
-        value = length
-        fh.read(length)
+        byte_string = fh.read(length)
+        is_jfif = byte_string.find(b"JFIF")
+        is_gzip = byte_string.find(b"\x1f\x8b")
+        value = '(len: %s) jfif %s  gzip %s' % (length, is_jfif, is_gzip)
+        
     
     elif tag_type == 8:
         tag = 'byte unk1'
@@ -74,10 +77,12 @@ def nbt_read(fh):
         #TAG_Compound
         tag = "Compound"
     elif tag_type == 11: # int array?
-        tag = 'int_array?'
+        tag = 'variable length int32_t array'
         length = int.from_bytes(fh.read(4), byteorder='little')
-        value = length
-        fh.read(length*4)
+        value = '(len: %s) ' % length
+        for i in range(0, length):
+            byte_string = fh.read(4)
+            value += '%s,' % (int.from_bytes(byte_string, byteorder='little', signed=True),)
     elif tag_type == 227:
         tag = '6 byte something'
         fh.read(6)
@@ -93,11 +98,34 @@ def nbt_read(fh):
     elif tag_type == 230:
         tag = 'byte unk2' #bool?
         value = int.from_bytes(fh.read(1), byteorder='little')
-    elif tag_type == 243:
-        tag = 'int array 2?'
+    elif tag_type == 231:
+        tag = 'variable length string array'
         length = int.from_bytes(fh.read(4), byteorder='little')
-        value = length
-        fh.read(length*4)
+
+        value = '(count: %s) ' % (length, )
+        for i in range(0, length):
+            value += '"%s",' % (nbt_read_string(fh),)
+    elif tag_type == 232:
+        tag = 'unk variable length 8 byte array'
+        length = int.from_bytes(fh.read(4), byteorder='little')
+        fh.read(length*8)
+        value  = '(len: %s) ' % length
+    elif tag_type == 233:
+        tag = 'unk variable length 12 byte array'
+        length = int.from_bytes(fh.read(4), byteorder='little')
+        fh.read(length*12)
+        value  = '(len: %s) ' % length
+    elif tag_type == 235:
+        tag = '12 byte unk'
+        fh.read(12)
+    elif tag_type == 243:
+        tag = 'variable length float array'
+        length = int.from_bytes(fh.read(4), byteorder='little')
+        value = '(len: %s) ' % (length, )
+        for i in range(0, length):
+            byte_string = fh.read(4)
+            value += '%s,' % (struct.unpack('<f', byte_string)[0],)
+
     elif tag_type == 244:
         tag = '8 byte array?'
         length = int.from_bytes(fh.read(4), byteorder='little')
@@ -108,12 +136,18 @@ def nbt_read(fh):
         length = int.from_bytes(fh.read(4), byteorder='little')
         value = length
         fh.read(length*2)
+    else:
+        print('undefined tag %s' % tag_type)
+        exit()
     
     print('%s[%s] %s - "%s" (%s)' % (''.join(['\t'*depth]), tag_type, tag, name, value))
     if tag_type == 10:
         depth += 1
     if tag_type == 0:
         depth -= 1
+        if depth < 0:
+            print('-----------------------------------------------------------')
+            depth = 0
 
     return True
 
