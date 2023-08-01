@@ -15,7 +15,6 @@ def nbt_read(fh):
     #it is assumed that the next byte is a tagType
 
     tag_type = ord(fh.read(1))
-    print(tag_type)
     if tag_type != 0:
         name = nbt_read_string(fh)
     else:
@@ -27,7 +26,6 @@ def nbt_read(fh):
     if tag_type == 0:
         #TAG_End
         tag = 'End'
-        depth-=1
     elif tag_type == 1:
         tag = 'Integer'
         value = int.from_bytes(fh.read(4), byteorder='little')
@@ -66,7 +64,6 @@ def nbt_read(fh):
     elif tag_type == 10:
         #TAG_Compound
         tag = "Compound"
-        depth+=1
     elif tag_type == 11: # int array?
         length = int.from_bytes(fh.read(4), byteorder='little')
         value = length
@@ -94,8 +91,12 @@ def nbt_read(fh):
         length = int.from_bytes(fh.read(4), byteorder='little')
         value = length
         fh.read(length*2)
-
-    print('%s>[%s] %s - "%s" (%s)' % (depth, tag_type, tag, name, value))
+    
+    print('%s[%s] %s - "%s" (%s)' % (''.join(['\t'*depth]), tag_type, tag, name, value))
+    if tag_type == 10:
+        depth += 1
+    if tag_type == 0:
+        depth -= 1
 with open('test1.cw4', mode='rb') as fh:
     expected_file_size = int.from_bytes(fh.read(4), byteorder="little")
 
