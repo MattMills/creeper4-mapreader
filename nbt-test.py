@@ -4,6 +4,122 @@ import struct
 
 depth = 0
 
+tag_value_to_name = {
+    0: 'End',
+    1: 'Int',
+    2: 'Float',
+    3: 'String',
+    4: 'List',
+    5: 'Short',
+    6: 'Double',
+    7: 'ByteArray',
+    8: 'Byte',
+    9: 'Long',
+    10: 'Compound',
+    11: 'IntArray',
+    227: 'BoolArray',
+    228: 'Vector4Array',
+    229: 'Vector4',
+    230: 'Bool',
+    231: 'StringArray',
+    232: 'Vector2Array',
+    233: 'Vector3Array',
+    234: 'Vector2',
+    235: 'Vector3',
+    236: 'Quaternion',
+    238: 'ULongArray',
+    239: 'UIntArray',
+    240: 'UShortArray',
+    241: 'SByteArray',
+    242: 'DoubleArray',
+    243: 'FloatArray',
+    244: 'LongArray',
+    245: 'Timestamp',
+    246: 'DateTime',
+    247: 'ShortArray',
+    248: 'ULong',
+    249: 'UInt', 
+    250: 'UShort',
+    251: 'SByte',
+    253: 'IP',
+    254: 'MAC',
+}
+
+type_bytes = {
+    'End': 0,
+    'Int': 4,
+    'Float': 4,
+    'Short': 2,
+    'Double': 8,
+    'ByteArray': 1,
+    'Byte': 1,
+    'Long': 8,
+    'IntArray': 4,
+    'BoolArray': 1,
+    'Vector4Array': 16,
+    'Vector4': 16,
+    'Bool': 1,
+    'StringArray': 1,
+    'Vector2Array': 8,
+    'Vector3Array': 12,
+    'Vector2': 8,
+    'Vector3': 12,
+    #'Quaternion': unk,
+    'ULongArray': 8,
+    'UIntArray': 4,
+    'UShortArray': 2,
+    'SByteArray': 1,
+    'DoubleArray': 8,
+    'FloatArray': 4,
+    'LongArray': 8,
+    'Timestamp': 8,
+    'DateTime': 8,
+    'ShortArray': 2,
+    'ULong': 8,
+    'UInt': 4,
+    'UShort': 2,
+    'SByte': 1,
+    #'IP': unk,
+    #'MAC': unk,
+}
+
+type_formats = {
+    'Int': '<i',
+    'Float': '<f',
+    'Short': '<h',
+    'Double': '<d',
+    'ByteArray': '<B',
+    'Byte': '<B',
+    'Long': '<q',
+    'IntArray': '<i',
+    'BoolArray': '<?',
+    'Vector4Array': '<ffff',
+    'Vector4': '<ffff',
+    'Bool': '<?',
+    'Vector2Array': '<ff',
+    'Vector3Array': '<fff',
+    'Vector2': '<ff',
+    'Vector3': '<fff',
+    #'Quaternion': unk,
+    'ULongArray': '<Q',
+    'UIntArray': '<I',
+    'UShortArray': '<H',
+    'SByteArray': '<b',
+    'DoubleArray': '<d',
+    'FloatArray': '<f',
+    'LongArray': '<q',
+    #'Timestamp': '<q', #TODO: wrong
+    #'DateTime': '<q', #TODO: wrong
+    'ShortArray': '<h',
+    'ULong': '<Q',
+    'UInt': '<I',
+    'UShort': '<H',
+    'SByte': '<b',
+    #'IP': unk,
+    #'MAC': unk,
+
+}    
+
 def nbt_read_string(fh):
     string_size = int.from_bytes(fh.read(2), byteorder="little")
     if(string_size > 255):
@@ -20,130 +136,73 @@ def nbt_read(fh):
     if len(byte_in) == 0:
         return False
     tag_type = ord(byte_in)
+    
+
+    #tag names per il2cpp data NBT.Tags.Tag$$GetNamedTypeFromId()
+    if tag_type not in tag_value_to_name:
+        print('FATAL ERROR: Undefined NBT tag type: %s' % (tag_type,))
+        exit()
+
+    tag = tag_value_to_name[tag_type]
+    value = ''
+    length = 0
+
     if tag_type != 0:
         name = nbt_read_string(fh)
     else:
         name = ''
 
-    tag = 'unimplemented[%s]' % (tag_type)
-    value = 'n/a'
+    if tag in type_bytes:
+        read_size = type_bytes[tag]
 
-    if tag_type == 0:
-        #TAG_End
-        tag = 'End'
-    elif tag_type == 1:
-        tag = 'int32_t'
-        value = int.from_bytes(fh.read(4), byteorder='little', signed=True)
-    elif tag_type == 2:
-        tag = 'float'
-        byte_string = fh.read(4)
     
-        value = struct.unpack('<f', byte_string)[0]
-    elif tag_type == 3:
-        tag = 'String'
-        length = int.from_bytes(fh.read(2), byteorder='little')
-        string = fh.read(length)
-        
-        value = '(len: %s) "%s"'  % (length, string)
-        
-    elif tag_type == 4:
-        tag = '5 byte unk'
-        fh.read(5)
-    elif tag_type == 5:
-        tag = 'short?'
-        value = int.from_bytes(fh.read(2), byteorder='little')
-    elif tag_type == 6:
-        tag = 'Double?'
-        byte_string = fh.read(8)
-        value = struct.unpack('<d', byte_string)[0]
-    elif tag_type == 7:
-        tag = 'Byte_Array?'
-        length = int.from_bytes(fh.read(4), byteorder='little') 
-        byte_string = fh.read(length)
-        is_jfif = byte_string.find(b"JFIF")
-        is_gzip = byte_string.find(b"\x1f\x8b")
-        value = '(len: %s) jfif %s  gzip %s' % (length, is_jfif, is_gzip)
-        
+    if 'Array' in tag:
+        byte_string =  fh.read(4)
+        length = struct.unpack('<i', byte_string)[0]
+
+    elif tag == 'String':
+        byte_string = fh.read(2)
+        length = struct.unpack('<h', byte_string)[0]
+
+    elif tag in type_bytes:
+        byte_string = fh.read(read_size)
+        length = 1
+
     
-    elif tag_type == 8:
-        tag = 'byte unk1'
-        value = int.from_bytes(fh.read(1), byteorder='little')
-    elif tag_type == 9:
-        tag = 'List'
-        sub_tag_id = int.from_bytes(fh.read(4), byteorder='little')
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        print('List: %s %s ' % (sub_tag_id, length))
-    elif tag_type == 10:
-        #TAG_Compound
-        tag = "Compound"
-    elif tag_type == 11: # int array?
-        tag = 'variable length int32_t array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        value = '(len: %s) ' % length
-        for i in range(0, length):
-            byte_string = fh.read(4)
-            value += '%s,' % (int.from_bytes(byte_string, byteorder='little', signed=True),)
-    elif tag_type == 227:
-        tag = '6 byte something'
-        fh.read(6)
-    elif tag_type == 228:
-        tag = '16 byte variable length array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        value = length
-        fh.read(length*16)
-        
-    elif tag_type == 229:
-        tag = '16  byte unk'
-        fh.read(16)
-    elif tag_type == 230:
-        tag = 'byte unk2' #bool?
-        value = int.from_bytes(fh.read(1), byteorder='little')
-    elif tag_type == 231:
-        tag = 'variable length string array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
+    if tag in type_formats:
+        type_format = type_formats[tag]
 
-        value = '(count: %s) ' % (length, )
-        for i in range(0, length):
-            value += '"%s",' % (nbt_read_string(fh),)
-    elif tag_type == 232:
-        tag = 'unk variable length 8 byte array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        fh.read(length*8)
-        value  = '(len: %s) ' % length
-    elif tag_type == 233:
-        tag = 'unk variable length 12 byte array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        fh.read(length*12)
-        value  = '(len: %s) ' % length
-    elif tag_type == 235:
-        tag = '12 byte unk'
-        fh.read(12)
-    elif tag_type == 243:
-        tag = 'variable length float array'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        value = '(len: %s) ' % (length, )
-        for i in range(0, length):
-            byte_string = fh.read(4)
-            value += '%s,' % (struct.unpack('<f', byte_string)[0],)
-
-    elif tag_type == 244:
-        tag = '8 byte array?'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        value = length
-        fh.read(length*8)
-    elif tag_type == 247:
-        tag = '2 byte array?'
-        length = int.from_bytes(fh.read(4), byteorder='little')
-        value = length
-        fh.read(length*2)
+        if 'Array' in tag:
+            value = []
+            for i in range(0, length):
+                byte_string = fh.read(read_size)
+                value.append(struct.unpack(type_format, byte_string))
+        else:
+            value = struct.unpack(type_format, byte_string)
     else:
-        print('undefined tag %s' % tag_type)
-        exit()
+        if tag == 'String':
+            value = '(len: %s) "%s"'  % (length, fh.read(length))
     
-    print('%s[%s] %s - "%s" (%s)' % (''.join(['\t'*depth]), tag_type, tag, name, value))
-    if tag_type == 10:
+        elif tag == 'List':
+            sub_tag_id = int.from_bytes(fh.read(1), byteorder='little')
+            length = int.from_bytes(fh.read(4), byteorder='little')
+            value = 'sub_tag(%s) length(%s)' % (sub_tag_id, length)
+            #TODO: recursion
+
+        elif tag == 'StringArray':
+            value = '(count: %s) ' % (length, )
+            for i in range(0, length):
+                value += '"%s",' % (nbt_read_string(fh),)
+    
+    if tag not in ('ByteArray', ):
+        
+        print('%s[%s] %s - "%s" (len: %s) %s' % (''.join(['\t'*depth]), tag_type, tag, name, length, value))
+    else:
+        print('%s[%s] %s - "%s" (len: %s)' % (''.join(['\t'*depth]), tag_type, tag, name, length))
+        
+    if tag == 'Compound':
         depth += 1
-    if tag_type == 0:
+    if tag == 'End':
         depth -= 1
         if depth < 0:
             print('-----------------------------------------------------------')
