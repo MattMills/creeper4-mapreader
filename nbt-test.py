@@ -1,8 +1,19 @@
 import gzip
-import python_nbt
 import struct
+import sys
 
-depth = 0
+
+#Due to the way the recursion works right now, need to increase the limit a bit
+sys.setrecursionlimit(10000)
+
+#OPTION: output ByteArrays as files, trying to guess if they are JPG, PNG, or TXT. (byte arrays are not otherwise output as files or in print output)
+opt_output_files = False
+
+#OPTION: output structure to stdout, uses recursive_print below.
+opt_print = False
+
+
+
 
 tag_value_to_name = {
     0: 'End',
@@ -64,7 +75,7 @@ type_bytes = {
     'Vector3Array': 12,
     'Vector2': 8,
     'Vector3': 12,
-    #'Quaternion': unk,
+    'Quaternion': 16,
     'ULongArray': 8,
     'UIntArray': 4,
     'UShortArray': 2,
@@ -88,7 +99,7 @@ type_formats = {
     'Float': '<f',
     'Short': '<h',
     'Double': '<d',
-    'ByteArray': '<B',
+    ##'ByteArray': '<B',
     'Byte': '<B',
     'Long': '<q',
     'IntArray': '<i',
@@ -120,6 +131,17 @@ type_formats = {
 
 }    
 
+
+depth = 0
+tag_path = []
+
+file_count = 1
+
+if opt_output_files:
+    with open('output-filenames.txt', 'w') as fh:
+        fh.write('')
+
+
 def nbt_read_string(fh):
     string_size = int.from_bytes(fh.read(2), byteorder="little")
     if(string_size > 255):
@@ -128,26 +150,31 @@ def nbt_read_string(fh):
 
     return string.decode('utf-8')
 
-def nbt_read(fh):
-    global depth
-    #it is assumed that the next byte is a tagType
+def nbt_read(fh, tag_tree, sub_tag = None):
+    global depth, file_count, tag_path
 
-    byte_in = fh.read(1)
-    if len(byte_in) == 0:
-        return False
-    tag_type = ord(byte_in)
+    fh_pos = fh.tell()
+
+    if sub_tag == None:
+        byte_in = fh.read(1)
+        if len(byte_in) == 0:
+            return tag_tree
+        tag_type = ord(byte_in)
+    else:
+        tag_type = sub_tag
     
 
     #tag names per il2cpp data NBT.Tags.Tag$$GetNamedTypeFromId()
-    if tag_type not in tag_value_to_name:
-        print('FATAL ERROR: Undefined NBT tag type: %s' % (tag_type,))
-        exit()
+    if tag_type not in tag_value_to_name:   
+        raise(BaseException('FATAL ERROR: Undefined NBT tag type: %s at file offset: %s' % (tag_type, fh_pos)))
 
     tag = tag_value_to_name[tag_type]
-    value = ''
+    value = None
     length = 0
-
-    if tag_type != 0:
+    
+    #print('DBG_NBT_READ %s, %s %s' % (fh_pos, tag_path, tag))
+    
+    if tag_type != 0 and sub_tag == None:
         name = nbt_read_string(fh)
     else:
         name = ''
@@ -176,39 +203,132 @@ def nbt_read(fh):
             value = []
             for i in range(0, length):
                 byte_string = fh.read(read_size)
-                value.append(struct.unpack(type_format, byte_string))
+                unpacked_values = list(struct.unpack(type_format, byte_string))
+                if(len(unpacked_values) == 1):
+                    value.append(unpacked_values[0])
+                else:
+                    value.append(unpacked_values)
         else:
-            value = struct.unpack(type_format, byte_string)
+            unpacked_values = list(struct.unpack(type_format, byte_string))
+            if(len(unpacked_values) == 1):
+                value = unpacked_values[0]
+            else:
+                value = unpacked_values
     else:
         if tag == 'String':
-            value = '(len: %s) "%s"'  % (length, fh.read(length))
+            value = fh.read(length)
     
         elif tag == 'List':
             sub_tag_id = int.from_bytes(fh.read(1), byteorder='little')
-            length = int.from_bytes(fh.read(4), byteorder='little')
-            value = 'sub_tag(%s) length(%s)' % (sub_tag_id, length)
-            #TODO: recursion
-
+            length = int.from_bytes(fh.read(4), byteorder='little', signed=True)
         elif tag == 'StringArray':
             value = '(count: %s) ' % (length, )
             for i in range(0, length):
                 value += '"%s",' % (nbt_read_string(fh),)
+        elif tag == 'ByteArray':
+            value = fh.read(length)
+ 
+    if tag in ('ByteArray',) and length > 0 and opt_output_files:
+        extension = ''
+
+        if(value.find(b'JFIF') != -1):
+            extension = '.jpg'
+        elif(value.find(b'PNG') != -1):
+            extension = '.png'
+        elif(all(c < 128 for c in value)):
+            extension = '.txt'
+        
+        with open('output-%s%s'% (file_count, extension), 'wb') as fwh:
+            fwh.write(value)
+
+        with open('output-filenames.txt', 'a') as fwh:
+            fwh.write('%s output-%s%s %s\n'% (name, file_count, extension, tag_path))
+        file_count += 1
+
+   
+    #if tag not in ('ByteArray', ) and not ('Array' in tag  and length > 100):
+    #    print('%s[%s]{%s} %s - "%s" (len: %s) %s' % (''.join(['\t'*depth]), tag_type, fh_pos, tag, name, length, value))
+    #else:
+    #    print('%s[%s]{%s} %s - "%s" (len: %s)' % (''.join(['\t'*depth]), tag_type, fh_pos, tag, name, length))
     
-    if tag not in ('ByteArray', ):
-        
-        print('%s[%s] %s - "%s" (len: %s) %s' % (''.join(['\t'*depth]), tag_type, tag, name, length, value))
-    else:
-        print('%s[%s] %s - "%s" (len: %s)' % (''.join(['\t'*depth]), tag_type, tag, name, length))
-        
+    this_tag = {
+        'tag': tag,
+        'name': name, 
+        'tag_type': tag_type, 
+        'file_pos': fh_pos, 
+        'length': length, 
+        'value': value
+    }
+
+    #print('DBG_NBT_READ %s, %s %s %s' % (fh_pos, tag_path, tag, name))
+
+    if tag == 'List':
+
+        this_tag['sub_tag_id'] = sub_tag_id
+
+        this_tag['value'] = []
+
+        for i in range(0, length):
+            tag_path.append('List-%s' % name)
+            depth += 1
+            result = nbt_read(fh,[], sub_tag_id)
+
+            this_tag['value'].append(result)
+           
+        tag_tree.append(this_tag)
     if tag == 'Compound':
         depth += 1
-    if tag == 'End':
-        depth -= 1
-        if depth < 0:
-            print('-----------------------------------------------------------')
-            depth = 0
+        tag_path.append(name)
+        result = nbt_read(fh, [])
+        this_tag['value'] = result
 
-    return True
+        tag_tree.append(this_tag)
+
+    elif tag == 'End':
+        depth -= 1
+        if(len(tag_path) > 0):
+            tag_path.pop()
+
+        tag_tree.append(this_tag)
+        return tag_tree
+    else:
+        tag_tree.append(this_tag)
+
+    if(sub_tag != None ):
+        depth -= 1
+        if(len(tag_path) > 0):
+            tag_path.pop()
+        return tag_tree
+    else:
+        return nbt_read(fh, tag_tree)
+
+
+
+
+
+
+
+
+
+
+
+
+def recursive_print(depth, obj):
+    if isinstance(obj, list):
+        for x in obj:
+            recursive_print(depth+1, x)
+    elif isinstance(obj, dict) and 'value' in obj.keys() and isinstance(obj['value'], list) and obj['tag'] in ('Compound', 'List'):
+        filtered_dict = {k:v for k,v in obj.items() if k not in 'value'}
+
+        print('%s%s VALUES [ ' % (''.join(' '*depth), filtered_dict))
+        for x in obj['value']:
+            recursive_print(depth+1, x)
+        print('%s] ' % (''.join(' '*depth)))
+        
+    else:
+        if isinstance(obj, dict) and 'tag' in obj.keys() and obj['tag'] in ('ByteArray',) and 'value' in obj.keys():
+            del obj['value']
+        print('%s%s,' % (''.join(' '*depth), obj))
 
 with open('test1.cw4', mode='rb') as fh:
     expected_file_size = int.from_bytes(fh.read(4), byteorder="little")
@@ -217,10 +337,13 @@ with open('test1.cw4', mode='rb') as fh:
     #contents = gzfh.read()
     #measured_file_size = len(contents)
     #gzfh.seek(4)
+    try:
+        tag_tree = nbt_read(gzfh, [])
+    except:
+        raise
 
-    ret = True
-    while(ret):
-        ret = nbt_read(gzfh)
+    if(opt_print):
+        recursive_print(0, tag_tree)
         
 
 
@@ -229,5 +352,3 @@ with open('test1.cw4', mode='rb') as fh:
 #    exit()
 
 
-#for i in range(0, 32):
-#    print('%s %s %s' % (contents[i:i+1], hex(ord(contents[i:i+1])), ord(contents[i:i+1])))
